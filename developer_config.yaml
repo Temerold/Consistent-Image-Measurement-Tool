@@ -1,0 +1,3 @@
+gui:
+    icon: icon.png
+    style: WindowsVista # Options: "Fusion", "Windows", "WindowsVista" (default: "WindowsVista")
