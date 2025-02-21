@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
             initial_x = (screen.width() - width) // 2
         else:
             initial_x *= screen.width()
+
         if initial_y == -1:
             initial_y = (screen.height() - height) // 2
         else:
