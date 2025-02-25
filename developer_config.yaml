@@ -3,7 +3,7 @@ gui:
     icon: images/application_icon.png # (default: "icon.png")
     style: WindowsVista # Options: "Fusion", "Windows", "WindowsVista" (default: "WindowsVista")
     tool_bar:
-        icon_width: 24 # (default: 24)
+        icon_width: 32 # (default: 32)
         icons:
             draw_line: images/draw_line.png # (default: "draw_line.png")
 

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Callable
 
 import yaml
+from PIL import Image
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
@@ -46,6 +47,13 @@ class MainWindow(QMainWindow):
 
         self.create_menu_item_bar()
         self.create_tool_bar()
+
+    def qpixmap_to_image(self, pixmap: QPixmap):
+        qimage = pixmap.toImage()
+        buffer = qimage.bits().asstring(
+            qimage.width() * qimage.height() * qimage.depth() // 8
+        )
+        return Image.frombytes("RGBA", (qimage.width(), qimage.height()), buffer)
 
     def resizeEvent(self, _):
         unscaled_image = self.image_viewer.unscaled_image
@@ -157,15 +165,15 @@ class MainWindow(QMainWindow):
             message_box.setText(
                 "No project open. Do you want to create a new one or open an existing one?"
             )
-            no_button = message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
+            # no_button = message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
             new_button = message_box.addButton("New", QMessageBox.ButtonRole.ActionRole)
             open_button = message_box.addButton(
                 "Open", QMessageBox.ButtonRole.ActionRole
             )
 
-            no_button.clicked.connect(lambda *a: print("No"))
-            new_button.clicked.connect(lambda *a: print("New"))
-            open_button.clicked.connect(lambda *a: print("Open"))
+            # no_button.clicked.connect(lambda *a: print("No"))
+            new_button.clicked.connect(self.new_project)
+            open_button.clicked.connect(self.open_project)
 
             message_box.exec()
 
@@ -219,7 +227,21 @@ class MainWindow(QMainWindow):
         print("Open project")
 
     def save_project(self):
-        print("Save project")
+        file_dialog = QFileDialog()
+        file_dialog.setWindowTitle("Save project")
+        file_dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+        file_dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        name_filters = [
+            f"{self.developer_config["gui"]["title"]} project file (*.cimt)"
+        ]
+        file_dialog.setNameFilters(name_filters)
+        if file_dialog.exec() and not (file_path := file_dialog.selectedFiles()[0]):
+            raise FileNotFoundError("Could not save project... Not sure why not.")
+        image = self.image_viewer.unscaled_image
+        image = self.qpixmap_to_image(image)
+
+        # TODO: Merge image with measurement data and save it as a cimt file
+        # NOTE: It's becoming very blue-shifted when saved as a png
 
     def save_project_as_image(self):
         print("Save project as image")
