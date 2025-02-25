@@ -1,0 +1,1 @@
+pyinstaller --onefile --icon=braincell_icon.ico BrainCell.pyw

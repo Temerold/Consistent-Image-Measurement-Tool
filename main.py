@@ -3,32 +3,217 @@ from pathlib import Path
 from typing import Callable
 
 import yaml
-from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMenuBar, QTextEdit
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QAction, QIcon, QPixmap
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QLabel,
+    QMainWindow,
+    QMenuBar,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QToolBar,
+    QVBoxLayout,
+)
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config, developer_config):
-        self.config = config
-        self.developer_config = developer_config
-        self.script_dir = Path(__file__).parent
+    def __init__(self, config: dict, developer_config: dict):
+        self.config: dict = config
+        self.developer_config: dict = developer_config
+        self.script_dir: Path = Path(__file__).parent
+        self.application_title: str = self.developer_config["gui"]["title"]
+        self.application_icon: QIcon = QIcon(
+            str(self.script_dir / self.developer_config["gui"]["icon"])
+        )
 
         super().__init__()
+        self.setWindowTitle(self.application_title)
+        self.setWindowIcon(self.application_icon)
         self.set_initial_window_position()
-        self.setWindowTitle("Consistent Image Measurement Tool")
-        self.setWindowIcon(
-            QIcon(str(Path(self.script_dir / self.developer_config["gui"]["icon"])))
-        )
         self.create_gui()
 
     def create_gui(self):
-        self.text_edit = QTextEdit(self)
-        self.setCentralWidget(self.text_edit)
+        self.image_viewer = QLabel(self)
+        self.image_viewer.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        )
+        self.image_viewer.unscaled_image = QPixmap()
+        self.setCentralWidget(self.image_viewer)
 
         self.create_menu_item_bar()
+        self.create_tool_bar()
+
+    def resizeEvent(self, _):
+        unscaled_image = self.image_viewer.unscaled_image
+        if unscaled_image.isNull():
+            return
+
+        # According to my own testing, images whose largest dimension is 64 or less look
+        # better when `Qt.TransformationMode.FastTransformation` is used, while larger
+        # images look better when `Qt.TransformationMode.SmoothTransformation` is used.
+        # TODO: Consider using a more sophisticated algorithm to determine the best
+        # transformation mode. Nearest neighbor interpolation might be better for pixel
+        # accuaracy, which is important for the measurements.
+        largest_size = max(unscaled_image.width(), unscaled_image.height())
+        if largest_size > 64:
+            transformation_mode = Qt.TransformationMode.SmoothTransformation
+        else:
+            transformation_mode = Qt.TransformationMode.FastTransformation
+
+        scaled_image = unscaled_image.scaled(
+            self.image_viewer.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            transformation_mode,
+        )
+        self.image_viewer.setPixmap(scaled_image)
+
+    def create_tool_bar(self) -> QMenuBar:
+        def create_tool_bar_button(
+            tool_bar: str,
+            icon_path: str,
+            hover_text: str,
+            status_text: str,
+            action: Callable,
+            checkable: bool = False,
+        ) -> QAction:
+            icon_path = str(self.script_dir / icon_path)
+            # Using `QIcon(icon_path)` doesn't scale the icon, so we pass a `QPixmap` to
+            # `QIcon` instead
+            icon_pixmap = QPixmap(icon_path)
+            icon_pixmap = icon_pixmap.scaled(
+                QSize(icon_width, icon_width), Qt.AspectRatioMode.KeepAspectRatio
+            )
+            icon = QIcon(icon_pixmap)
+            button = QAction(icon, hover_text, self)
+
+            action_ = lambda *a: action(
+                *a, button, icon_path, hover_text, status_text, checkable
+            )
+            button.triggered.connect(action_)
+            button.setCheckable(checkable)
+            tool_bar.addAction(button)
+
+            return button
+
+        self.tool_bar = QToolBar(self)
+        icon_width = self.developer_config["gui"]["tool_bar"]["icon_width"]
+        self.tool_bar.setIconSize(QSize(icon_width, icon_width))
+        self.addToolBar(self.tool_bar)
+
+        self.status_bar = self.statusBar()
+        self.current_action = QLabel()
+        self.current_sub_action = QLabel()
+        self.status_bar.addWidget(self.current_action)
+        self.status_bar.addWidget(self.current_sub_action)
+
+        tool_bar_icons = self.developer_config["gui"]["tool_bar"]["icons"]
+        self.tool_bar_buttons = [
+            {
+                "icon_path": tool_bar_icons["draw_line"],
+                "hover_text": "Draw line",
+                "status_text": "Drawing line",
+                "action": self.draw_line,
+                "checkable": True,
+            }
+        ]
+        for tool_bar_button in self.tool_bar_buttons:
+            tool_bar_button["object"] = create_tool_bar_button(
+                self.tool_bar,
+                tool_bar_button["icon_path"],
+                tool_bar_button["hover_text"],
+                tool_bar_button["status_text"],
+                tool_bar_button["action"],
+                tool_bar_button["checkable"],
+            )
+
+    def abort_current_action_if_any(self):
+        if current_action := self.current_action.text():
+            response = QMessageBox.warning(
+                self,
+                "Warning",
+                f"Do you want to abort the current action: {current_action}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if response == QMessageBox.StandardButton.Yes:
+                self.current_action.setText("")
+                for tool_bar_button in self.tool_bar_buttons:
+                    tool_bar_button["object"].setChecked(False)
+
+            return response == QMessageBox.StandardButton.Yes
+
+        return True
+
+    def draw_line(self, checked: bool, button: QAction, *_):
+        def no_project_open_prompt():
+            message_box = QMessageBox()
+            message_box.setWindowTitle("Information")
+            message_box.setWindowIcon(self.application_icon)
+            message_box.setIcon(QMessageBox.Icon.Information)
+            message_box.setText(
+                "No project open. Do you want to create a new one or open an existing one?"
+            )
+            no_button = message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
+            new_button = message_box.addButton("New", QMessageBox.ButtonRole.ActionRole)
+            open_button = message_box.addButton(
+                "Open", QMessageBox.ButtonRole.ActionRole
+            )
+
+            no_button.clicked.connect(lambda *a: print("No"))
+            new_button.clicked.connect(lambda *a: print("New"))
+            open_button.clicked.connect(lambda *a: print("Open"))
+
+            message_box.exec()
+
+        if self.image_viewer.unscaled_image.isNull():
+            button.setChecked(False)
+            if no_project_open_prompt():
+                button.setChecked(True)
+            else:
+                return
+
+        if checked:
+            status_text = self.tool_bar_buttons[0]["status_text"]
+            self.current_action.setText(status_text)
+        else:
+            self.current_action.setText("")
+            return
+
+        # Make the image select
+        # Select point 1
+
+        # Select point 2
+
+    def show_image(self, image: QPixmap):
+        scaled_image = image.scaled(
+            self.image_viewer.size(), Qt.AspectRatioMode.KeepAspectRatio
+        )
+        self.image_viewer.unscaled_image = QPixmap(image)
+        self.image_viewer.setPixmap(scaled_image)
+        self.image_viewer.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )  # Center the image in the label
+
+    def get_image_from_file_dialog(self) -> QPixmap | None:
+        file_dialog = QFileDialog()
+        file_dialog.setWindowTitle("Open image")
+        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        file_dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        name_filters = self.developer_config["file_handling"]["image_formats"]
+        file_dialog.setNameFilters(name_filters)
+        if file_dialog.exec() and (file_path := file_dialog.selectedFiles()[0]):
+            return QPixmap(file_path)
 
     def new_project(self):
+        if not self.abort_current_action_if_any():
+            return
         print("New project")
+        if image := self.get_image_from_file_dialog():
+            self.show_image(image)
 
     def open_project(self):
         print("Open project")
@@ -43,23 +228,47 @@ class MainWindow(QMainWindow):
         print("Settings")
 
     def about(self):
-        print("About")
+        class AboutDialog(QDialog):
+            def __init__(self, application_title: str, application_icon: QIcon):
+                super().__init__()
+                self.setWindowTitle("About")
+                self.setWindowIcon(application_icon)
+                icon_label = QLabel()
+                icon_label.setPixmap(application_icon.pixmap(128, 128))
+                icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                with open("about.html", "r", encoding="utf-8") as file:
+                    about_label_text = file.read().replace(
+                        "{application_title}", application_title
+                    )
+                about_label = QLabel(about_label_text)
+                about_label.setOpenExternalLinks(True)
+                close_button = QPushButton("Close")
+                close_button.clicked.connect(self.accept)
+
+                layout = QVBoxLayout()
+                layout.addWidget(icon_label)
+                layout.addWidget(about_label)
+                layout.addWidget(close_button)
+                self.setLayout(layout)
+
+                width = self.sizeHint().width()
+                height = self.sizeHint().height()
+                self.setFixedSize(width, height)
+
+        if not hasattr(self, "about_dialog"):
+            self.about_dialog = AboutDialog(
+                self.application_title, self.application_icon
+            )
+        self.about_dialog.exec()
 
     def set_initial_window_position(self):
-        width, height = self.config["gui"]["initial_size"]
-        initial_x, initial_y = self.config["gui"]["initial_position"]
+        (width, height) = self.config["gui"]["initial_size"]
+        (initial_x, initial_y) = self.config["gui"]["initial_position"]
         screen = app.primaryScreen().availableGeometry()
 
-        if config["gui"]["maximized"]:
-            self.showMaximized()
-            return
-
-        if config["gui"]["full_screen"]:
-            self.showFullScreen()
-            return
-
-        width = round(width if width > 1 else width * screen.width()) or 1
-        height = round(height if height > 1 else height * screen.height()) or 1
+        width = round(width if width > 1 else width * screen.width())
+        height = round(height if height > 1 else height * screen.height())
 
         if initial_x == -1:
             initial_x = (screen.width() - width) // 2
@@ -71,10 +280,27 @@ class MainWindow(QMainWindow):
         else:
             initial_y *= screen.height()
 
-        self.setGeometry(initial_x, initial_y, width, height)
+        if config["gui"]["full_screen"]:
+            self.showFullScreen()
+        elif config["gui"]["maximized"]:
+            self.showMaximized()
+        else:
+            self.setGeometry(initial_x, initial_y, width, height)
+
+        if not config["gui"]["resizable"]:
+            self.setFixedSize(width, height)
+
+        window_flags = [
+            [not config["gui"]["minimizable"], ~Qt.WindowType.WindowMinimizeButtonHint],
+            [not config["gui"]["maximizable"], ~Qt.WindowType.WindowMaximizeButtonHint],
+            [not config["gui"]["closable"], ~Qt.WindowType.WindowCloseButtonHint],
+        ]
+        for condition in window_flags:
+            if condition[0]:
+                self.setWindowFlags(self.windowFlags() & condition[1])
 
     def create_menu_item_bar(self) -> QAction | QMenuBar:
-        def create_menu_item(menu_name: str, menu_item: Callable | dict, parent_menu):
+        def create_menu_item(parent_menu, menu_name: str, menu_item: Callable | dict):
             if callable(menu_item):
                 new_menu_item = QAction(menu_name, self)
                 new_menu_item.triggered.connect(menu_item)
@@ -82,7 +308,7 @@ class MainWindow(QMainWindow):
             elif isinstance(menu_item, dict):
                 parent_menu = parent_menu.addMenu(menu_name)
                 for parent, child in menu_item.items():
-                    new_menu_item = create_menu_item(parent, child, parent_menu)
+                    new_menu_item = create_menu_item(parent_menu, parent, child)
             else:
                 raise ValueError("Menu item must be a callable or a dictionary or.")
             return new_menu_item
@@ -100,7 +326,7 @@ class MainWindow(QMainWindow):
 
         menu_bar = self.menuBar()
         for parent, child in menu.items():
-            create_menu_item(parent, child, menu_bar)
+            create_menu_item(menu_bar, parent, child)
 
 
 def load_config(file_path):

@@ -1,0 +1,2 @@
+## Attribution
+Some icons by [Yusuke Kamiyamane](https://p.yusukekamiyamane.com/) and upscaled by [Chris Billington](https://github.com/chrisjbillington/fugue-2x-icons/). Licensed under a [Creative Commons Attribution 3.0 License](https://creativecommons.org/licenses/by/3.0/).

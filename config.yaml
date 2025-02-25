@@ -4,3 +4,6 @@ gui:
     maximized: false # Options: true, false (default: false)
     full_screen: false # Options: true, false (default: false)
     resizable: true # Options: true, false (default: true)
+    minimizable: true # Options: true, false (default: true)
+    maximizable: true # Options: true, false (default: true)
+    closable: true # Options: true, false (default: true)

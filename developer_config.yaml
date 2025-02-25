@@ -1,3 +1,40 @@
 gui:
-    icon: icon.png
+    title: "Consistent Image Measurement Tool" # (default: "Consistent Image Measurement Tool")
+    icon: images/application_icon.png # (default: "icon.png")
     style: WindowsVista # Options: "Fusion", "Windows", "WindowsVista" (default: "WindowsVista")
+    tool_bar:
+        icon_width: 24 # (default: 24)
+        icons:
+            draw_line: images/draw_line.png # (default: "draw_line.png")
+
+file_handling:
+    # File formats supported by OpenCV (https://docs.opencv.org/3.4/d4/da8/group__imgcodecs.html)
+    # (default:
+    # [
+    #     "All image files (*.png; *.jpeg; *.jpg; *.jpe; *.jp2; *.exr; *.pbm; *.pgm; *.ppm; *.hdr; *.pic; *.sr; *.ras; *.tiff; *.tif; *.webp; *.bmp; *.dib)",
+    #     "Portable Network Graphics (*.png)",
+    #     "JPEG (*.jpeg; *.jpg; *.jpg)",
+    #     "JPEG 2000 (*.jp2)",
+    #     "OpenEXR (*.exr)",
+    #     "Portable image format (*.pbm; *.pgm; *.ppm)",
+    #     "Radiance HDR (*.hdr; *.pic)",
+    #     "Sun rasters (*.sr; *.ras)",
+    #     "TIFF (*.tiff; *.tif)",
+    #     "WebP (*.webp)",
+    #     "Windows bitmaps (*.bmp; *.dib)",
+    # ]
+    # )
+    image_formats:
+        [
+            "All image files (*.png; *.jpeg; *.jpg; *.jpe; *.jp2; *.exr; *.pbm; *.pgm; *.ppm; *.hdr; *.pic; *.sr; *.ras; *.tiff; *.tif; *.webp; *.bmp; *.dib)",
+            "Portable Network Graphics (*.png)",
+            "JPEG (*.jpeg; *.jpg; *.jpe)",
+            "JPEG 2000 (*.jp2)",
+            "OpenEXR (*.exr)",
+            "Portable image format (*.pbm; *.pgm; *.ppm)",
+            "Radiance HDR (*.hdr; *.pic)",
+            "Sun rasters (*.sr; *.ras)",
+            "TIFF (*.tiff; *.tif)",
+            "WebP (*.webp)",
+            "Windows bitmaps (*.bmp; *.dib)",
+        ]
