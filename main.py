@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Callable
 
 import yaml
-from PIL import Image
+from PIL import ImageQt
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
@@ -21,6 +21,11 @@ from PyQt6.QtWidgets import (
 )
 
 
+class Project:
+    def save(self):
+        pass
+
+
 class MainWindow(QMainWindow):
     def __init__(self, config: dict, developer_config: dict):
         self.config: dict = config
@@ -30,6 +35,7 @@ class MainWindow(QMainWindow):
         self.application_icon: QIcon = QIcon(
             str(self.script_dir / self.developer_config["gui"]["icon"])
         )
+        self.project = Project()
 
         super().__init__()
         self.setWindowTitle(self.application_title)
@@ -42,22 +48,15 @@ class MainWindow(QMainWindow):
         self.image_viewer.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
-        self.image_viewer.unscaled_image = QPixmap()
+        self.project.unscaled_pixmap = QPixmap()
         self.setCentralWidget(self.image_viewer)
 
         self.create_menu_item_bar()
         self.create_tool_bar()
 
-    def qpixmap_to_image(self, pixmap: QPixmap):
-        qimage = pixmap.toImage()
-        buffer = qimage.bits().asstring(
-            qimage.width() * qimage.height() * qimage.depth() // 8
-        )
-        return Image.frombytes("RGBA", (qimage.width(), qimage.height()), buffer)
-
     def resizeEvent(self, _):
-        unscaled_image = self.image_viewer.unscaled_image
-        if unscaled_image.isNull():
+        unscaled_pixmap = self.project.unscaled_pixmap
+        if unscaled_pixmap.isNull():
             return
 
         # According to my own testing, images whose largest dimension is 64 or less look
@@ -66,13 +65,13 @@ class MainWindow(QMainWindow):
         # TODO: Consider using a more sophisticated algorithm to determine the best
         # transformation mode. Nearest neighbor interpolation might be better for pixel
         # accuaracy, which is important for the measurements.
-        largest_size = max(unscaled_image.width(), unscaled_image.height())
+        largest_size = max(unscaled_pixmap.width(), unscaled_pixmap.height())
         if largest_size > 64:
             transformation_mode = Qt.TransformationMode.SmoothTransformation
         else:
             transformation_mode = Qt.TransformationMode.FastTransformation
 
-        scaled_image = unscaled_image.scaled(
+        scaled_image = unscaled_pixmap.scaled(
             self.image_viewer.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             transformation_mode,
@@ -163,21 +162,22 @@ class MainWindow(QMainWindow):
             message_box.setWindowIcon(self.application_icon)
             message_box.setIcon(QMessageBox.Icon.Information)
             message_box.setText(
-                "No project open. Do you want to create a new one or open an existing one?"
+                "No project open. Do you want to create a new one or open an existing "
+                "one?"
             )
-            # no_button = message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
+
+            message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
             new_button = message_box.addButton("New", QMessageBox.ButtonRole.ActionRole)
             open_button = message_box.addButton(
                 "Open", QMessageBox.ButtonRole.ActionRole
             )
 
-            # no_button.clicked.connect(lambda *a: print("No"))
             new_button.clicked.connect(self.new_project)
             open_button.clicked.connect(self.open_project)
 
             message_box.exec()
 
-        if self.image_viewer.unscaled_image.isNull():
+        if self.project.unscaled_pixmap.isNull():
             button.setChecked(False)
             if no_project_open_prompt():
                 button.setChecked(True)
@@ -200,13 +200,13 @@ class MainWindow(QMainWindow):
         scaled_image = image.scaled(
             self.image_viewer.size(), Qt.AspectRatioMode.KeepAspectRatio
         )
-        self.image_viewer.unscaled_image = QPixmap(image)
+        self.project.unscaled_pixmap = QPixmap(image)
         self.image_viewer.setPixmap(scaled_image)
         self.image_viewer.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
         )  # Center the image in the label
 
-    def get_image_from_file_dialog(self) -> QPixmap | None:
+    def get_image_path_from_file_dialog(self):
         file_dialog = QFileDialog()
         file_dialog.setWindowTitle("Open image")
         file_dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -214,13 +214,14 @@ class MainWindow(QMainWindow):
         name_filters = self.developer_config["file_handling"]["image_formats"]
         file_dialog.setNameFilters(name_filters)
         if file_dialog.exec() and (file_path := file_dialog.selectedFiles()[0]):
-            return QPixmap(file_path)
+            return file_path
 
     def new_project(self):
         if not self.abort_current_action_if_any():
             return
         print("New project")
-        if image := self.get_image_from_file_dialog():
+        if image_path := self.get_image_path_from_file_dialog():
+            image = Image()
             self.show_image(image)
 
     def open_project(self):
@@ -232,12 +233,12 @@ class MainWindow(QMainWindow):
         file_dialog.setFileMode(QFileDialog.FileMode.AnyFile)
         file_dialog.setViewMode(QFileDialog.ViewMode.Detail)
         name_filters = [
-            f"{self.developer_config["gui"]["title"]} project file (*.cimt)"
+            f"{self.developer_config['gui']['title']} project file (*.cimt)"
         ]
         file_dialog.setNameFilters(name_filters)
         if file_dialog.exec() and not (file_path := file_dialog.selectedFiles()[0]):
             raise FileNotFoundError("Could not save project... Not sure why not.")
-        image = self.image_viewer.unscaled_image
+        image = self.project.unscaled_pixmap
         image = self.qpixmap_to_image(image)
 
         # TODO: Merge image with measurement data and save it as a cimt file
@@ -332,7 +333,7 @@ class MainWindow(QMainWindow):
                 for parent, child in menu_item.items():
                     new_menu_item = create_menu_item(parent_menu, parent, child)
             else:
-                raise ValueError("Menu item must be a callable or a dictionary or.")
+                raise ValueError("Menu item must be a callable or a dictionary.")
             return new_menu_item
 
         menu = {
