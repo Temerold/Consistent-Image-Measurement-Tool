@@ -1,11 +1,11 @@
+import json
 import sys
 from pathlib import Path
 from typing import Callable
 
 import yaml
-from PIL import ImageQt
-from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QAction, QIcon, QPixmap
+from PyQt6.QtCore import QBuffer, QByteArray, QFileInfo, QIODevice, QSize, Qt
+from PyQt6.QtGui import QAction, QIcon, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -21,9 +21,33 @@ from PyQt6.QtWidgets import (
 )
 
 
+def get_element(object, index, fallback):
+    try:
+        return object[index]
+    except IndexError:
+        return fallback
+
+
 class Project:
-    def save(self):
-        pass
+    def __init__(self):
+        self.unscaled_pixmap = QPixmap()
+        self.measurements = []
+
+    def image_to_base_64(self, image: QImage):
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        image.save(buffer, "PNG")  # TODO: Save it as its original file format
+        return byte_array.toBase64().data()
+
+    def save(self, filepath) -> None:
+        image = self.unscaled_pixmap.toImage()
+        data = {
+            "image": self.image_to_base_64(image).decode("utf-8"),
+            "measurements": self.measurements,
+        }
+        with open(filepath, "w") as file:
+            json.dump(data, file)
 
 
 class MainWindow(QMainWindow):
@@ -48,7 +72,6 @@ class MainWindow(QMainWindow):
         self.image_viewer.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
-        self.project.unscaled_pixmap = QPixmap()
         self.setCentralWidget(self.image_viewer)
 
         self.create_menu_item_bar()
@@ -155,34 +178,30 @@ class MainWindow(QMainWindow):
 
         return True
 
+    def no_project_open_prompt(self):
+        message_box = QMessageBox()
+        message_box.setWindowTitle("Information")
+        message_box.setWindowIcon(self.application_icon)
+        message_box.setIcon(QMessageBox.Icon.Information)
+        message_box.setText(
+            "No project open. Do you want to create a new one or open an existing "
+            "one?"
+        )
+
+        message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
+        new_button = message_box.addButton("New", QMessageBox.ButtonRole.ActionRole)
+        open_button = message_box.addButton("Open", QMessageBox.ButtonRole.ActionRole)
+
+        new_button.clicked.connect(self.new_project)
+        open_button.clicked.connect(self.load_project_from_file)
+
+        message_box.exec()
+
     def draw_line(self, checked: bool, button: QAction, *_):
-        def no_project_open_prompt():
-            message_box = QMessageBox()
-            message_box.setWindowTitle("Information")
-            message_box.setWindowIcon(self.application_icon)
-            message_box.setIcon(QMessageBox.Icon.Information)
-            message_box.setText(
-                "No project open. Do you want to create a new one or open an existing "
-                "one?"
-            )
-
-            message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
-            new_button = message_box.addButton("New", QMessageBox.ButtonRole.ActionRole)
-            open_button = message_box.addButton(
-                "Open", QMessageBox.ButtonRole.ActionRole
-            )
-
-            new_button.clicked.connect(self.new_project)
-            open_button.clicked.connect(self.open_project)
-
-            message_box.exec()
-
         if self.project.unscaled_pixmap.isNull():
             button.setChecked(False)
-            if no_project_open_prompt():
-                button.setChecked(True)
-            else:
-                return
+            self.no_project_open_prompt()
+            return
 
         if checked:
             status_text = self.tool_bar_buttons[0]["status_text"]
@@ -196,15 +215,14 @@ class MainWindow(QMainWindow):
 
         # Select point 2
 
-    def show_image(self, image: QPixmap):
-        scaled_image = image.scaled(
+    def show_pixmap(self, image: QPixmap):
+        scaled_pixmap = image.scaled(
             self.image_viewer.size(), Qt.AspectRatioMode.KeepAspectRatio
         )
-        self.project.unscaled_pixmap = QPixmap(image)
-        self.image_viewer.setPixmap(scaled_image)
+        self.image_viewer.setPixmap(scaled_pixmap)
         self.image_viewer.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-        )  # Center the image in the label
+        )
 
     def get_image_path_from_file_dialog(self):
         file_dialog = QFileDialog()
@@ -213,21 +231,52 @@ class MainWindow(QMainWindow):
         file_dialog.setViewMode(QFileDialog.ViewMode.Detail)
         name_filters = self.developer_config["file_handling"]["image_formats"]
         file_dialog.setNameFilters(name_filters)
-        if file_dialog.exec() and (file_path := file_dialog.selectedFiles()[0]):
-            return file_path
+        file_dialog.exec()
+        filepath = get_element(file_dialog.selectedFiles(), 0, None)
+        if QFileInfo(filepath).isDir():
+            return
+        return filepath
 
     def new_project(self):
         if not self.abort_current_action_if_any():
             return
         print("New project")
-        if image_path := self.get_image_path_from_file_dialog():
-            image = Image()
-            self.show_image(image)
+        if filepath := self.get_image_path_from_file_dialog():
+            image = QImage(filepath)
+            self.project.unscaled_pixmap = QPixmap.fromImage(image)
+            pixmap = QPixmap.fromImage(image)
+            self.show_pixmap(pixmap)
 
-    def open_project(self):
-        print("Open project")
+    def load_project_from_file(self):
+        file_dialog = QFileDialog()
+        file_dialog.setWindowTitle("Open project")
+        file_dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+        file_dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        name_filters = [
+            f"{self.developer_config['gui']['title']} project file (*.cimt)"
+        ]
+        file_dialog.setNameFilters(name_filters)
+        file_dialog.exec()
+        filepath = get_element(file_dialog.selectedFiles(), 0, None)
+        if not filepath or QFileInfo(filepath).isDir():
+            return
 
-    def save_project(self):
+        with open(filepath, encoding="utf-8") as file:
+            data = json.load(file)
+
+        # TODO: Catch errors
+        base_64_image_data = bytes(data["image"], encoding="utf-8")
+        measurements = data["measurements"]
+        image = self.image_from_base_64(base_64_image_data)
+        self.project.unscaled_pixmap = QPixmap(image)
+        self.project.measurements = measurements
+        self.show_pixmap(self.project.unscaled_pixmap)
+
+    def save_project_as_file(self):
+        if self.project.unscaled_pixmap.isNull():
+            self.no_project_open_prompt()
+            return
+
         file_dialog = QFileDialog()
         file_dialog.setWindowTitle("Save project")
         file_dialog.setFileMode(QFileDialog.FileMode.AnyFile)
@@ -236,19 +285,20 @@ class MainWindow(QMainWindow):
             f"{self.developer_config['gui']['title']} project file (*.cimt)"
         ]
         file_dialog.setNameFilters(name_filters)
-        if file_dialog.exec() and not (file_path := file_dialog.selectedFiles()[0]):
-            raise FileNotFoundError("Could not save project... Not sure why not.")
-        image = self.project.unscaled_pixmap
-        image = self.qpixmap_to_image(image)
+        file_dialog.exec()
+        filepath = get_element(file_dialog.selectedFiles(), 0, None)
+        if not filepath or QFileInfo(filepath).isDir():
+            return
+        if not filepath.endswith(".cimt"):
+            filepath += ".cimt"
+        self.project.save(filepath)
 
-        # TODO: Merge image with measurement data and save it as a cimt file
-        # NOTE: It's becoming very blue-shifted when saved as a png
+    def image_from_base_64(self, base_64_data):
+        byte_array = QByteArray.fromBase64(base_64_data)
+        return QImage.fromData(byte_array, "PNG")
 
-    def save_project_as_image(self):
+    def save_project_as_image_file(self):
         print("Save project as image")
-
-    def settings(self):
-        print("Settings")
 
     def about(self):
         class AboutDialog(QDialog):
@@ -339,11 +389,11 @@ class MainWindow(QMainWindow):
         menu = {
             "File": {
                 "New project": self.new_project,
-                "Open project": self.open_project,
-                "Save project": self.save_project,
-                "Save project as image": self.save_project_as_image,
+                "Open project": self.load_project_from_file,
+                "Save project": self.save_project_as_file,
+                "Save project as image": self.save_project_as_image_file,
             },
-            "Settings": self.settings,
+            # "Settings": self.settings,
             "Help": {"About": self.about},
         }
 
@@ -352,10 +402,10 @@ class MainWindow(QMainWindow):
             create_menu_item(menu_bar, parent, child)
 
 
-def load_config(file_path):
+def load_config(filepath):
     script_dir = Path(__file__).parent
-    file_path = script_dir / file_path
-    with open(file_path, "r") as file:
+    filepath = script_dir / filepath
+    with open(filepath, "r") as file:
         return yaml.safe_load(file)
 
 
