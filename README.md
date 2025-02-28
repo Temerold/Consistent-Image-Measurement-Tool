@@ -6,4 +6,4 @@ In accordance with the license used by the [Google Python Style Guide](https://g
 * `max-line-length` has been changed from 80 to 88
 
 ## Attribution
-Some icons by [Yusuke Kamiyamane](https://p.yusukekamiyamane.com/) and upscaled by [Chris Billington](https://github.com/chrisjbillington/fugue-2x-icons/). Licensed under a [Creative Commons Attribution 3.0 License](https://creativecommons.org/licenses/by/3.0/).
+This project uses some icons by [Yusuke Kamiyamane](https://p.yusukekamiyamane.com/) and upscaled by [Chris Billington](https://github.com/chrisjbillington/fugue-2x-icons/), licensed under a [Creative Commons Attribution 3.0 License](https://creativecommons.org/licenses/by/3.0/).
