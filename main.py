@@ -67,13 +67,19 @@ class MainWindow(QMainWindow):
         self.set_initial_window_position()
         self.create_gui()
 
-    def create_gui(self):
+    def create_image_viewer(self):
         self.image_viewer = QLabel(self)
         self.image_viewer.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
         self.setCentralWidget(self.image_viewer)
 
+    def create_data_viewer(self):
+        pass
+
+    def create_gui(self):
+        self.create_image_viewer()
+        self.create_data_viewer()
         self.create_menu_item_bar()
         self.create_tool_bar()
 
@@ -111,7 +117,7 @@ class MainWindow(QMainWindow):
             checkable: bool = False,
         ) -> QAction:
             icon_path = str(self.script_dir / icon_path)
-            # Using `QIcon(icon_path)` doesn't scale the icon, so we pass a `QPixmap` to
+            # Using `QIcon(icon_path)` doesn't scale the icon, so pass a `QPixmap` to
             # `QIcon` instead
             icon_pixmap = QPixmap(icon_path)
             icon_pixmap = icon_pixmap.scaled(
@@ -198,19 +204,18 @@ class MainWindow(QMainWindow):
         message_box.exec()
 
     def draw_line(self, checked: bool, button: QAction, *_):
+        if not checked:
+            self.current_action.setText("")
+            return
+
         if self.project.unscaled_pixmap.isNull():
             button.setChecked(False)
             self.no_project_open_prompt()
             return
 
-        if checked:
-            status_text = self.tool_bar_buttons[0]["status_text"]
-            self.current_action.setText(status_text)
-        else:
-            self.current_action.setText("")
-            return
+        status_text = self.tool_bar_buttons[0]["status_text"]
+        self.current_action.setText(status_text)
 
-        # Make the image select
         # Select point 1
 
         # Select point 2
