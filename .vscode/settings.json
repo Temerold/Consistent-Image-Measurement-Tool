@@ -1,8 +1,9 @@
 {
-    "isort.args": ["--profile", "black"],
     "black-formatter.args": [
         "--skip-magic-trailing-comma",
         "--line-length",
         "88"
-    ]
+    ],
+    "isort.args": ["--profile", "black"],
+    "pylint.args": ["--rc-file=../pylintrc"]
 }
