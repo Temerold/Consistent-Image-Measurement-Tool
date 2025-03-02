@@ -1,8 +1,10 @@
 {
-    "isort.args": ["--profile", "black"],
     "black-formatter.args": [
         "--skip-magic-trailing-comma",
         "--line-length",
         "88"
-    ]
+    ],
+    "cSpell.words": ["cimt", "maximizable", "minimizable", "Pixmap"],
+    "isort.args": ["--profile", "black"],
+    "pylint.args": ["--rc-file=../pylintrc"]
 }
