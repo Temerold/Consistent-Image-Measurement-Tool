@@ -1,5 +1,4 @@
 import json
-import sys
 from pathlib import Path
 from typing import Callable
 
@@ -7,13 +6,14 @@ import yaml
 from PyQt6.QtCore import (
     QBuffer,
     QByteArray,
+    QCoreApplication,
     QFileInfo,
     QIODevice,
+    QPoint,
     QSize,
     Qt,
-    pyqtSignal,
 )
-from PyQt6.QtGui import QAction, QCursor, QIcon, QImage, QPixmap
+from PyQt6.QtGui import QAction, QCursor, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QToolBar,
     QVBoxLayout,
+    QWidget,
 )
 
 
@@ -37,7 +38,7 @@ class Project:
     def save(self, filepath) -> None:
         image = self.unscaled_pixmap.toImage()
         data = {
-            "image": image_to_base_64(image).decode("utf-8"),
+            "image": get_base_64_from_image(image).decode("utf-8"),
             "measurements": self.measurements,
         }
         with open(filepath, "w", encoding="utf-8") as file:
@@ -55,6 +56,8 @@ class MainWindow(QMainWindow):
             str(self.script_dir / self.developer_config["gui"]["icon"])
         )
         self.project = Project()
+        self.press_position = None
+        self.press_released = False
 
         super().__init__()
         self.setWindowTitle(self.application_title)
@@ -63,22 +66,18 @@ class MainWindow(QMainWindow):
         self.set_window_flags()
         self.create_gui()
 
-    class ClickWidget(QWidget):
-        press_position = None
-        clicked = pyqtSignal()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.press_position = event.pos()
+            self.press_released = False
 
-        def mousePressEvent(self, event):
-            if event.button() == Qt.LeftButton:
-                self.press_position = event.pos()
-
-        def mouseReleaseEvent(self, event):
-            if (
-                self.press_position is not None
-                and event.button() == Qt.LeftButton
-                and event.pos() in self.rect()
-            ):
-                self.clicked.emit()
-            self.press_position = None
+    def mouseReleaseEvent(self, event):
+        if (
+            self.press_position
+            and event.button() == Qt.MouseButton.LeftButton
+            and event.pos() in self.rect()
+        ):
+            self.press_released = True
 
     def set_initial_window_position(self):
         (width, height) = self.config["gui"]["initial_size"]
@@ -165,6 +164,7 @@ class MainWindow(QMainWindow):
             icon_path: str,
             hover_text: str,
             status_text: str,
+            sub_status_text: list[str],
             action: Callable,
             checkable: bool = False,
         ) -> QAction:
@@ -180,7 +180,13 @@ class MainWindow(QMainWindow):
 
             button.triggered.connect(
                 lambda *a: action(
-                    *a, button, icon_path, hover_text, status_text, checkable
+                    *a,
+                    button,
+                    icon_path,
+                    hover_text,
+                    status_text,
+                    sub_status_text,
+                    checkable,
                 )
             )
             button.setCheckable(checkable)
@@ -205,6 +211,7 @@ class MainWindow(QMainWindow):
                 "icon_path": tool_bar_icons["draw_line"],
                 "hover_text": "Draw line",
                 "status_text": "Drawing line",
+                "sub_status_texts": ["Selecting point 1", "Selecting point 2"],
                 "action": self.draw_line,
                 "checkable": True,
             }
@@ -215,6 +222,7 @@ class MainWindow(QMainWindow):
                 tool_bar_button["icon_path"],
                 tool_bar_button["hover_text"],
                 tool_bar_button["status_text"],
+                tool_bar_button["sub_status_texts"],
                 tool_bar_button["action"],
                 tool_bar_button["checkable"],
             )
@@ -232,12 +240,12 @@ class MainWindow(QMainWindow):
     def new_project(self):
         if not self.abort_current_action_if_any():
             return
-        print("New project")
+
         if filepath := self.get_image_path_from_file_dialog():
             image = QImage(filepath)
             self.project.unscaled_pixmap = QPixmap.fromImage(image)
             pixmap = QPixmap.fromImage(image)
-            self.show_pixmap(pixmap)
+            self.update_pixmap(pixmap)
 
     def load_project_from_file(self):
         file_dialog = QFileDialog()
@@ -258,10 +266,10 @@ class MainWindow(QMainWindow):
 
         base_64_image_data = bytes(data["image"], encoding="utf-8")
         measurements = data["measurements"]
-        image = image_from_base_64(base_64_image_data)
+        image = get_image_from_base_64(base_64_image_data)
         self.project.unscaled_pixmap = QPixmap(image)
         self.project.measurements = measurements
-        self.show_pixmap(self.project.unscaled_pixmap)
+        self.update_pixmap(self.project.unscaled_pixmap)
 
     def save_project_as_file(self):
         if self.project.unscaled_pixmap.isNull():
@@ -325,9 +333,13 @@ class MainWindow(QMainWindow):
             )
         self.about_dialog.exec()
 
-    def draw_line(self, checked: bool, button: QAction, *_):
+    def clear_all_statuses(self):
+        self.current_action.setText("")
+        self.current_sub_action.setText("")
+
+    def draw_line(self, checked: bool, button: QAction, *_) -> None:
         if not checked:
-            self.current_action.setText("")
+            self.clear_all_statuses()
             return
 
         if self.project.unscaled_pixmap.isNull():
@@ -336,19 +348,85 @@ class MainWindow(QMainWindow):
             return
 
         status_text = self.tool_bar_buttons[0]["status_text"]
+        sub_status_texts = self.tool_bar_buttons[0]["sub_status_texts"]
         self.current_action.setText(status_text)
 
-        # Select point 1
-        print(self.get_cursor_position())
-        # Select point 2
+        # So, at this point in development, I am quite stressed due to a deadline. I'm
+        # developing this program to help me place measurements on images for a school
+        # subject which has nothing to do with programming. Yes, it's completely
+        # unnecessary. Any way: the following code is as a result going to be quite bad.
+        # For this, I am sorry.
 
-    def get_cursor_position(self):
-        cursor_position = QCursor().pos()
-        x = cursor_position.x()
-        y = cursor_position.y()
-        return x, y
+        self.current_sub_action.setText(sub_status_texts[0])
+        image_viewer_point_one = self.get_mouse_press_in_image_viewer_position()
+        image_point_one = self.get_image_position_from_image_viewer_position(
+            image_viewer_point_one
+        )
 
-    def show_pixmap(self, image: QPixmap):
+        pixmap = self.project.unscaled_pixmap
+        print(f"image point: {str(image_point_one)}")
+        image_viewer_point_one = self.get_image_viewer_position_from_image_position(
+            image_point_one
+        )
+        color = Qt.GlobalColor.white  # ! TEMPORARY COLOR
+        pen = QPen(color)
+        pen.setWidth(20)
+        painter = QPainter(pixmap)
+        painter.setPen(pen)
+        painter.drawPoint(*image_viewer_point_one)
+        self.update_pixmap(pixmap)
+        print(f"image viewer point one: {str(image_viewer_point_one)}")
+
+        self.current_sub_action.setText(sub_status_texts[1])
+        image_viewer_point_two = self.get_mouse_press_in_image_viewer_position()
+        image_point_two = self.get_image_position_from_image_viewer_position(
+            image_viewer_point_two
+        )
+
+        self.project.measurements.append([image_point_one, image_point_two])
+
+        self.clear_all_statuses()
+        button.setChecked(False)
+
+    def get_image_viewer_position_from_image_position(
+        self, position: tuple[int, int]
+    ) -> tuple[int, int]:
+        pixmap = self.image_viewer.pixmap()
+        x = position[0] * (pixmap.width() / self.project.unscaled_pixmap.width())
+        y = position[1] * (pixmap.height() / self.project.unscaled_pixmap.height())
+        return (int(x), int(y))
+
+    def get_mouse_press_in_image_viewer_position(self) -> tuple[int, int]:
+        while self.isVisible():
+            position = self.get_mouse_press_position()
+            global_position = self.mapToGlobal(QPoint(*position))
+            local_position = self.image_viewer.mapFromGlobal(global_position)
+            pixmap = self.image_viewer.pixmap()
+
+            if (
+                0 <= local_position.x() <= pixmap.width()
+                and 0 <= local_position.y() <= pixmap.height()
+            ):
+                return (local_position.x(), local_position.y())
+
+    def get_image_position_from_image_viewer_position(
+        self, position: tuple[int, int]
+    ) -> tuple[int, int]:
+        pixmap = self.image_viewer.pixmap()
+        image_x = position[0] * self.project.unscaled_pixmap.width() / pixmap.width()
+        image_y = position[1] * self.project.unscaled_pixmap.height() / pixmap.height()
+        return (int(image_x), int(image_y))
+
+    def get_mouse_press_position(self) -> tuple[int, int]:
+        self.press_position = None
+        self.press_released = False
+
+        while not self.press_position and not self.press_released and self.isVisible():
+            QCoreApplication.processEvents()
+
+        return (self.press_position.x(), self.press_position.y())
+
+    def update_pixmap(self, image: QPixmap):
         scaled_pixmap = image.scaled(
             self.image_viewer.size(), Qt.AspectRatioMode.KeepAspectRatio
         )
@@ -414,7 +492,7 @@ class MainWindow(QMainWindow):
         # According to my own testing, images whose largest dimension is 64 or less look
         # better when `Qt.TransformationMode.FastTransformation` is used, while larger
         # images look better when `Qt.TransformationMode.SmoothTransformation` is used.
-        # TODO: Consider using a more sophisticated algorithm to determine the best
+        # TODO Consider using a more sophisticated algorithm to determine the best
         # transformation mode. Nearest neighbor interpolation might be better for pixel
         # accuracy, which is important for the measurements.
         largest_size = max(unscaled_pixmap.width(), unscaled_pixmap.height())
@@ -438,15 +516,15 @@ def get_element(object, index, fallback):
         return fallback
 
 
-def image_to_base_64(image: QImage):
+def get_base_64_from_image(image: QImage):
     byte_array = QByteArray()
     buffer = QBuffer(byte_array)
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-    image.save(buffer, "PNG")  # TODO: Save with the format it was imported with
+    image.save(buffer, "PNG")  # TODO Save with the format it was imported with
     return byte_array.toBase64().data()
 
 
-def image_from_base_64(base_64_data):
+def get_image_from_base_64(base_64_data):
     byte_array = QByteArray.fromBase64(base_64_data)
     return QImage.fromData(byte_array, "PNG")
 
@@ -459,6 +537,8 @@ def load_config(filepath):
 
 
 if __name__ == "__main__":
+    import sys
+
     config = load_config("config.yaml")
     developer_config = load_config("developer_config.yaml")
     app = QApplication(sys.argv)
