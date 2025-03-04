@@ -13,7 +13,7 @@ from PyQt6.QtCore import (
     QSize,
     Qt,
 )
-from PyQt6.QtGui import QAction, QCursor, QIcon, QImage, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QAction, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -26,7 +26,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QToolBar,
     QVBoxLayout,
-    QWidget,
 )
 
 
@@ -197,6 +196,9 @@ class MainWindow(QMainWindow):
         self.tool_bar = QToolBar(self)
         icon_width = self.developer_config["gui"]["tool_bar"]["icon_width"]
         self.tool_bar.setIconSize(QSize(icon_width, icon_width))
+        self.tool_bar.changeEvent = lambda *_: self.update_pixmap(
+            self.project.unscaled_pixmap
+        )
         self.addToolBar(self.tool_bar)
 
         self.status_bar = self.statusBar()
@@ -298,6 +300,10 @@ class MainWindow(QMainWindow):
     def save_project_as_image_file(self):
         print("Save project as image")
 
+    def mouseMoveEvent(self, a0):  # TODO Remove this method after debugging
+        self.current_action.setText(f"Mouse position: {a0.pos()}")
+        super().mouseMoveEvent(a0)
+
     def about(self):
         class AboutDialog(QDialog):
             def __init__(self, application_title: str, application_icon: QIcon):
@@ -364,18 +370,19 @@ class MainWindow(QMainWindow):
         )
 
         pixmap = self.project.unscaled_pixmap
-        print(f"image point: {str(image_point_one)}")
         image_viewer_point_one = self.get_image_viewer_position_from_image_position(
             image_point_one
         )
+        print(f"image point one: {str(image_point_one)}")
+        print(f"image viewer point one: {str(image_viewer_point_one)}")
         color = Qt.GlobalColor.white  # ! TEMPORARY COLOR
         pen = QPen(color)
         pen.setWidth(20)
         painter = QPainter(pixmap)
         painter.setPen(pen)
-        painter.drawPoint(*image_viewer_point_one)
+        painter.drawPoint(1060, 860)
+        painter.end()
         self.update_pixmap(pixmap)
-        print(f"image viewer point one: {str(image_viewer_point_one)}")
 
         self.current_sub_action.setText(sub_status_texts[1])
         image_viewer_point_two = self.get_mouse_press_in_image_viewer_position()
@@ -392,8 +399,8 @@ class MainWindow(QMainWindow):
         self, position: tuple[int, int]
     ) -> tuple[int, int]:
         pixmap = self.image_viewer.pixmap()
-        x = position[0] * (pixmap.width() / self.project.unscaled_pixmap.width())
-        y = position[1] * (pixmap.height() / self.project.unscaled_pixmap.height())
+        x = position[0] * self.project.unscaled_pixmap.width() / pixmap.width()
+        y = position[1] * self.project.unscaled_pixmap.height() / pixmap.height()
         return (int(x), int(y))
 
     def get_mouse_press_in_image_viewer_position(self) -> tuple[int, int]:
@@ -413,9 +420,9 @@ class MainWindow(QMainWindow):
         self, position: tuple[int, int]
     ) -> tuple[int, int]:
         pixmap = self.image_viewer.pixmap()
-        image_x = position[0] * self.project.unscaled_pixmap.width() / pixmap.width()
-        image_y = position[1] * self.project.unscaled_pixmap.height() / pixmap.height()
-        return (int(image_x), int(image_y))
+        x = position[0] * self.project.unscaled_pixmap.width() / pixmap.width()
+        y = position[1] * self.project.unscaled_pixmap.height() / pixmap.height()
+        return (int(x), int(y))
 
     def get_mouse_press_position(self) -> tuple[int, int]:
         self.press_position = None
