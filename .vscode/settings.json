@@ -1,10 +1,17 @@
 {
     "black-formatter.args": [
-        "--skip-magic-trailing-comma",
         "--line-length",
-        "88"
+        "88",
+        "--skip-magic-trailing-comma"
     ],
-    "cSpell.words": ["cimt", "maximizable", "minimizable", "Pixmap"],
+    "cSpell.words": [
+        "cimt",
+        "maximizable",
+        "minimizable",
+        "pixmap",
+        "sourcery",
+        "temerold"
+    ],
     "isort.args": ["--profile", "black"],
     "pylint.args": ["--rc-file=../pylintrc"]
 }

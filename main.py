@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 from typing import Callable
 
@@ -13,7 +14,7 @@ from PyQt6.QtCore import (
     QSize,
     Qt,
 )
-from PyQt6.QtGui import QAction, QIcon, QImage, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -37,7 +38,7 @@ class Project:
     def save(self, filepath) -> None:
         image = self.unscaled_pixmap.toImage()
         data = {
-            "image": get_base_64_from_image(image).decode("utf-8"),
+            "image": image_to_base64(image).decode("utf-8"),
             "measurements": self.measurements,
         }
         with open(filepath, "w", encoding="utf-8") as file:
@@ -96,7 +97,7 @@ class MainWindow(QMainWindow):
         else:
             initial_y *= screen.height()
 
-        if self.config["gui"]["full_screen"]:
+        if self.config["gui"]["fullscreen"]:
             self.showFullScreen()
         elif self.config["gui"]["maximized"]:
             self.showMaximized()
@@ -125,7 +126,7 @@ class MainWindow(QMainWindow):
     def create_gui(self):
         self.create_menu_item_bar()
         self.create_tool_bar()
-        self.create_image_viewer()
+        self.create_pixmap_viewer()
         self.create_data_viewer()
 
     def create_menu_item_bar(self) -> QAction | QMenuBar:
@@ -147,9 +148,8 @@ class MainWindow(QMainWindow):
                 "New project": self.new_project,
                 "Open project": self.load_project_from_file,
                 "Save project": self.save_project_as_file,
-                "Save project as image": self.save_project_as_image_file,
+                "Export to image file": self.export_to_image_file,
             },
-            # "Settings": self.settings,
             "Help": {"About": self.about},
         }
 
@@ -190,7 +190,6 @@ class MainWindow(QMainWindow):
             )
             button.setCheckable(checkable)
             tool_bar.addAction(button)
-
             return button
 
         self.tool_bar = QToolBar(self)
@@ -202,10 +201,11 @@ class MainWindow(QMainWindow):
         self.addToolBar(self.tool_bar)
 
         self.status_bar = self.statusBar()
-        self.current_action = QLabel()
-        self.current_sub_action = QLabel()
-        self.status_bar.addWidget(self.current_action)
-        self.status_bar.addWidget(self.current_sub_action)
+        self.status = QLabel()
+        self.sub_status = QLabel()
+        self.status_bar.addWidget(self.status)
+        self.status_bar.addWidget(self.sub_status)
+        self.set_status("", "")
 
         tool_bar_icons = self.developer_config["gui"]["tool_bar"]["icons"]
         self.tool_bar_buttons = [
@@ -229,25 +229,25 @@ class MainWindow(QMainWindow):
                 tool_bar_button["checkable"],
             )
 
-    def create_image_viewer(self):
-        self.image_viewer = QLabel(self)
-        self.image_viewer.setSizePolicy(
+    def create_pixmap_viewer(self):
+        self.pixmap_viewer = QLabel(self)
+        self.pixmap_viewer.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
-        self.setCentralWidget(self.image_viewer)
+        self.setCentralWidget(self.pixmap_viewer)
 
     def create_data_viewer(self):
         pass
 
     def new_project(self):
+        if hasattr(self, "measurement_painter"):
+            self.measurement_painter.eraseRect()
+        self.project = Project()
         if not self.abort_current_action_if_any():
             return
-
-        if filepath := self.get_image_path_from_file_dialog():
-            image = QImage(filepath)
-            self.project.unscaled_pixmap = QPixmap.fromImage(image)
-            pixmap = QPixmap.fromImage(image)
-            self.update_pixmap(pixmap)
+        if filepath := self.get_filepath_from_file_dialog():
+            self.project.unscaled_pixmap = QPixmap.fromImage(QImage(filepath))
+            self.update_pixmap(self.project.unscaled_pixmap)
 
     def load_project_from_file(self):
         file_dialog = QFileDialog()
@@ -259,16 +259,15 @@ class MainWindow(QMainWindow):
         ]
         file_dialog.setNameFilters(name_filters)
         file_dialog.exec()
-        filepath = get_element(file_dialog.selectedFiles(), 0, None)
+        filepath = get_element(file_dialog.selectedFiles(), 0)
         if not filepath or QFileInfo(filepath).isDir():
             return
 
         with open(filepath, encoding="utf-8") as file:
             data = json.load(file)
-
-        base_64_image_data = bytes(data["image"], encoding="utf-8")
         measurements = data["measurements"]
-        image = get_image_from_base_64(base_64_image_data)
+        base64_image_data = bytes(data["image"], encoding="utf-8")
+        image = base64_to_image(base64_image_data)
         self.project.unscaled_pixmap = QPixmap(image)
         self.project.measurements = measurements
         self.update_pixmap(self.project.unscaled_pixmap)
@@ -289,7 +288,7 @@ class MainWindow(QMainWindow):
         ]
         file_dialog.setNameFilters(name_filters)
         file_dialog.exec()
-        filepath = get_element(file_dialog.selectedFiles(), 0, None)
+        filepath = get_element(file_dialog.selectedFiles(), 0)
         if not filepath or QFileInfo(filepath).isDir():
             return
         if not filepath.endswith(file_extension):
@@ -297,12 +296,8 @@ class MainWindow(QMainWindow):
 
         self.project.save(filepath)
 
-    def save_project_as_image_file(self):
-        print("Save project as image")
-
-    def mouseMoveEvent(self, a0):  # TODO Remove this method after debugging
-        self.current_action.setText(f"Mouse position: {a0.pos()}")
-        super().mouseMoveEvent(a0)
+    def export_to_image_file(self):
+        print("Export to image file")
 
     def about(self):
         class AboutDialog(QDialog):
@@ -339,23 +334,14 @@ class MainWindow(QMainWindow):
             )
         self.about_dialog.exec()
 
-    def clear_all_statuses(self):
-        self.current_action.setText("")
-        self.current_sub_action.setText("")
+    def set_status(self, status: str = None, sub_status: str = None):
+        if status is not None:
+            self.status.setText(status)
+        if sub_status is not None:
+            self.sub_status.setText(sub_status)
 
     def draw_line(self, checked: bool, button: QAction, *_) -> None:
-        if not checked:
-            self.clear_all_statuses()
-            return
-
-        if self.project.unscaled_pixmap.isNull():
-            button.setChecked(False)
-            self.no_project_open_prompt()
-            return
-
-        status_text = self.tool_bar_buttons[0]["status_text"]
-        sub_status_texts = self.tool_bar_buttons[0]["sub_status_texts"]
-        self.current_action.setText(status_text)
+        # sourcery skip: extract-duplicate-method
 
         # So, at this point in development, I am quite stressed due to a deadline. I'm
         # developing this program to help me place measurements on images for a school
@@ -363,96 +349,131 @@ class MainWindow(QMainWindow):
         # unnecessary. Any way: the following code is as a result going to be quite bad.
         # For this, I am sorry.
 
-        self.current_sub_action.setText(sub_status_texts[0])
-        image_viewer_point_one = self.get_mouse_press_in_image_viewer_position()
-        image_point_one = self.get_image_position_from_image_viewer_position(
-            image_viewer_point_one
-        )
+        if not checked:
+            self.set_status("", "")
+            return
+
+        # If no project is open, prompt the user to open or create one. If they don't,
+        # return
+        if self.project.unscaled_pixmap.isNull() and self.no_project_open_prompt() == 2:
+            button.setChecked(False)
+            return
+
+        status_text = self.tool_bar_buttons[0]["status_text"]
+        sub_status_texts = self.tool_bar_buttons[0]["sub_status_texts"]
+        self.set_status(status_text)
 
         pixmap = self.project.unscaled_pixmap
-        image_viewer_point_one = self.get_image_viewer_position_from_image_position(
-            image_point_one
+        if not hasattr(self, "measurement_painter"):
+            self.measurement_painter = self.create_measurement_painter(pixmap)
+        painter = self.measurement_painter
+
+        self.set_status(sub_status=sub_status_texts[0])
+        point_one_image_position = self.window_position_to_image_position(
+            self.get_mouse_press_window_position_in_pixmap_viewer()
         )
-        print(f"image point one: {str(image_point_one)}")
-        print(f"image viewer point one: {str(image_viewer_point_one)}")
-        color = Qt.GlobalColor.white  # ! TEMPORARY COLOR
-        pen = QPen(color)
-        pen.setWidth(20)
-        painter = QPainter(pixmap)
-        painter.setPen(pen)
-        painter.drawPoint(1060, 860)
-        painter.end()
-        self.update_pixmap(pixmap)
+        self.draw_point(point_one_image_position, painter, pixmap)
 
-        self.current_sub_action.setText(sub_status_texts[1])
-        image_viewer_point_two = self.get_mouse_press_in_image_viewer_position()
-        image_point_two = self.get_image_position_from_image_viewer_position(
-            image_viewer_point_two
+        self.set_status(sub_status=sub_status_texts[1])
+        point_two_image_position = self.window_position_to_image_position(
+            self.get_mouse_press_window_position_in_pixmap_viewer()
+        )
+        self.draw_point(point_two_image_position, painter, pixmap)
+
+        self.project.measurements.append(
+            [point_one_image_position, point_two_image_position]
         )
 
-        self.project.measurements.append([image_point_one, image_point_two])
-
-        self.clear_all_statuses()
+        self.set_status("", "")
         button.setChecked(False)
 
-    def get_image_viewer_position_from_image_position(
-        self, position: tuple[int, int]
-    ) -> tuple[int, int]:
-        pixmap = self.image_viewer.pixmap()
-        x = position[0] * self.project.unscaled_pixmap.width() / pixmap.width()
-        y = position[1] * self.project.unscaled_pixmap.height() / pixmap.height()
-        return (int(x), int(y))
+    def draw_extension_lines(self, point_one, point_two, painter, pixmap):
+        x_1 = point_one[0]
+        y_1 = point_one[1]
 
-    def get_mouse_press_in_image_viewer_position(self) -> tuple[int, int]:
+        x_2 = point_two[0]
+        y_2 = point_two[1]
+
+        m = (y_2 - y_1) / (x_2 - x_1)
+        b = y_1 - m * x_1
+
+        perpendicular_m = -1 / m
+        y = lambda x: perpendicular_m * x + b
+
+    def draw_point(
+        self,
+        image_position: tuple[int, int],
+        painter: QPainter,
+        pixmap: QPixmap,
+        update: bool = True,
+    ) -> None:
+        painter.drawPoint(*image_position)
+        if update:
+            self.update_pixmap(pixmap)
+
+    def create_measurement_painter(self, pixmap: QPixmap) -> QPainter:
+        smallest_dimension = min(pixmap.width(), pixmap.height())
+        color = QColor.fromRgb(*self.get_preview_guide_color())
+        width = self.get_line_width(smallest_dimension)
+        pen = QPen()
+        pen.setColor(color)
+        pen.setWidth(width)
+        painter = QPainter(pixmap)
+        painter.setPen(pen)
+        return painter
+
+    def get_line_width(self, smallest_dimension: int) -> int:
+        return math.ceil(
+            self.config["measurement_rendering"]["line_width"] * smallest_dimension
+        )
+
+    def get_mouse_press_window_position_in_pixmap_viewer(self) -> tuple[int, int]:
         while self.isVisible():
-            position = self.get_mouse_press_position()
+            position = self.get_mouse_press_window_position()
             global_position = self.mapToGlobal(QPoint(*position))
-            local_position = self.image_viewer.mapFromGlobal(global_position)
-            pixmap = self.image_viewer.pixmap()
-
+            local_position = self.pixmap_viewer.mapFromGlobal(global_position)
+            pixmap = self.pixmap_viewer.pixmap()
             if (
                 0 <= local_position.x() <= pixmap.width()
                 and 0 <= local_position.y() <= pixmap.height()
             ):
                 return (local_position.x(), local_position.y())
 
-    def get_image_position_from_image_viewer_position(
+    def window_position_to_image_position(
         self, position: tuple[int, int]
     ) -> tuple[int, int]:
-        pixmap = self.image_viewer.pixmap()
+        pixmap = self.pixmap_viewer.pixmap()
         x = position[0] * self.project.unscaled_pixmap.width() / pixmap.width()
         y = position[1] * self.project.unscaled_pixmap.height() / pixmap.height()
         return (int(x), int(y))
 
-    def get_mouse_press_position(self) -> tuple[int, int]:
+    def get_mouse_press_window_position(self) -> tuple[int, int]:
         self.press_position = None
         self.press_released = False
-
-        while not self.press_position and not self.press_released and self.isVisible():
+        while self.isVisible() and not self.press_position and not self.press_released:
             QCoreApplication.processEvents()
-
         return (self.press_position.x(), self.press_position.y())
 
     def update_pixmap(self, image: QPixmap):
         scaled_pixmap = image.scaled(
-            self.image_viewer.size(), Qt.AspectRatioMode.KeepAspectRatio
+            self.pixmap_viewer.size(), Qt.AspectRatioMode.KeepAspectRatio
         )
-        self.image_viewer.setPixmap(scaled_pixmap)
-        self.image_viewer.setAlignment(
+        self.pixmap_viewer.setPixmap(scaled_pixmap)
+        self.pixmap_viewer.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
         )
 
     def abort_current_action_if_any(self):
-        if current_action := self.current_action.text():
+        if status := self.status.text():
             response = QMessageBox.warning(
                 self,
                 "Warning",
-                f"Do you want to abort the current action: {current_action}?",
+                f"Do you want to abort the current action: {status}?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if response == QMessageBox.StandardButton.Yes:
-                self.current_action.setText("")
+                self.status.setText("")
                 for tool_bar_button in self.tool_bar_buttons:
                     tool_bar_button["object"].setChecked(False)
 
@@ -465,20 +486,20 @@ class MainWindow(QMainWindow):
         message_box.setWindowIcon(self.application_icon)
         message_box.setIcon(QMessageBox.Icon.Information)
         message_box.setText(
-            "No project open. Do you want to create a new one or open an existing "
-            "one?"
+            "No project is currently open. Do you want to open an existing project or "
+            "create a new one?"
         )
 
         message_box.addButton("No", QMessageBox.ButtonRole.RejectRole)
         new_button = message_box.addButton("New", QMessageBox.ButtonRole.ActionRole)
-        open_button = message_box.addButton("Open", QMessageBox.ButtonRole.ActionRole)
-
         new_button.clicked.connect(self.new_project)
+
+        open_button = message_box.addButton("Open", QMessageBox.ButtonRole.ActionRole)
         open_button.clicked.connect(self.load_project_from_file)
 
-        message_box.exec()
+        return message_box.exec()
 
-    def get_image_path_from_file_dialog(self):
+    def get_filepath_from_file_dialog(self):
         file_dialog = QFileDialog()
         file_dialog.setWindowTitle("Open image")
         file_dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -486,10 +507,13 @@ class MainWindow(QMainWindow):
         name_filters = self.developer_config["file_handling"]["image_formats"]
         file_dialog.setNameFilters(name_filters)
         file_dialog.exec()
-        filepath = get_element(file_dialog.selectedFiles(), 0, None)
+        filepath = get_element(file_dialog.selectedFiles(), 0)
         if QFileInfo(filepath).isDir():
             return
         return filepath
+
+    def paintEvent(self, _):
+        pass
 
     def resizeEvent(self, _):
         unscaled_pixmap = self.project.unscaled_pixmap
@@ -509,21 +533,35 @@ class MainWindow(QMainWindow):
             transformation_mode = Qt.TransformationMode.FastTransformation
 
         scaled_image = unscaled_pixmap.scaled(
-            self.image_viewer.size(),
+            self.pixmap_viewer.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             transformation_mode,
         )
-        self.image_viewer.setPixmap(scaled_image)
+        self.pixmap_viewer.setPixmap(scaled_image)
+
+    def draw_measurements(self):
+        print("Drawing measurements")
+        pixmap = self.project.unscaled_pixmap
+        self.measurement_painter = self.create_measurement_painter(pixmap)
+        print(self.project.measurements)
+        for measurement in self.project.measurements:
+            point_one = measurement[0]
+            point_two = measurement[1]
+            self.measurement_painter.drawLine(*point_one, *point_two)
+        # self.update_pixmap(pixmap)
+
+    def get_preview_guide_color(self) -> list[int]:
+        return self.config["measurement_rendering"]["preview_guide_color"]
 
 
-def get_element(object, index, fallback):
+def get_element(object, index, fallback=None):
     try:
         return object[index]
     except IndexError:
         return fallback
 
 
-def get_base_64_from_image(image: QImage):
+def image_to_base64(image: QImage):
     byte_array = QByteArray()
     buffer = QBuffer(byte_array)
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -531,8 +569,8 @@ def get_base_64_from_image(image: QImage):
     return byte_array.toBase64().data()
 
 
-def get_image_from_base_64(base_64_data):
-    byte_array = QByteArray.fromBase64(base_64_data)
+def base64_to_image(base64_data):
+    byte_array = QByteArray.fromBase64(base64_data)
     return QImage.fromData(byte_array, "PNG")
 
 

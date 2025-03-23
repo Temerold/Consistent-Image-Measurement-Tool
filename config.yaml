@@ -2,8 +2,12 @@ gui:
     initial_size: [800, 600] # Use fractions in decimal form to set the window size as a fraction of the screen size (default: [800, 600])
     initial_position: [-1, -1] # Use -1 to center the window on that axis or a fraction to set that axis as a fraction of the screen size (default: [-1, -1])
     maximized: false # Options: true, false (default: false)
-    full_screen: false # Options: true, false (default: false)
+    fullscreen: false # Options: true, false (default: false)
     resizable: true # Options: true, false (default: true)
     minimizable: true # Options: true, false (default: true)
     maximizable: true # Options: true, false (default: true)
     closable: true # Options: true, false (default: true)
+measurement_rendering:
+    line_width: 0.005 # Fraction in decimal form of the smallest image dimension (default: 0.005)
+    extension_line_length: 0.05 # Fraction in decimal form of the smallest image dimension (default: 0.05)
+    preview_guide_color: [255, 0, 0] # RGB color of the preview guides which are shown before a measurement is complete (default: [255, 0, 0])
