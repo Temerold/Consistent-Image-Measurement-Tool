@@ -1,3 +1,5 @@
+# This project has been abandoned! The school project I developed this program for has reached its deadline.
+
 ## Code style
 This project uses [Google's style guides](https://google.github.io/styleguide/).
 
